@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>IPv6 地址生成器</title>
+    <style>
+        .inline-div {
+            display: inline-block;
+            margin-right: 10px;
+        }
+    </style>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script type="text/javascript">
+        function getRandomBinarySegment(length) {
+            let segment = '';
+            for (let i = 0; i < length; i++) {
+                segment += Math.floor(Math.random() * 2);
+            }
+            return segment;
+        }
+
+        function expandIPv6Segments(segments) {
+            const emptySegmentIndex = segments.indexOf('');
+            if (emptySegmentIndex !== -1) {
+                const emptySegmentCount = 8 - segments.length + 1;
+                const emptySegments = Array(emptySegmentCount).fill('0000');
+                return [...segments.slice(0, emptySegmentIndex), ...emptySegments, ...segments.slice(emptySegmentIndex + 1)];
+            } else {
+                return segments;
+            }
+        }
+
+        function segmentToBinary(segment) {
+            if (segment.length < 4) {
+                segment = segment.padStart(4, '0');
+            }
+            return parseInt(segment, 16).toString(2).padStart(16, '0');
+        }
+
+        function convertIPv6ToBinary(ipv6) {
+            const segments = ipv6.split(':');
+            const expandedSegments = expandIPv6Segments(segments);
+            const binarySegments = expandedSegments.map(segmentToBinary);
+            return binarySegments.join('');
+        }
+
+        function padBinary(binary) {
+            const paddedLength = Math.ceil(binary.length / 128) * 128;
+            return binary.padEnd(paddedLength, '0');
+        }
+
+        function splitBinaryIntoSegments(binary, segmentSize) {
+            return binary.match(new RegExp(`.{1,${segmentSize}}`, 'g'));
+        }
+
+        function convertBinarySegmentToHex(segment) {
+            const hexSegment = parseInt(segment, 2).toString(16);
+            return hexSegment === '0' ? '' : hexSegment;
+        }
+
+        function findLongestEmptySequence(segments) {
+            let maxEmptyStart = -1;
+            let maxEmptyCount = 0;
+            let emptyStart = -1;
+            let emptyCount = 0;
+
+            $.each(segments, function (index, segment) {
+                if (segment === '') {
+                    if (emptyCount === 0) {
+                        emptyStart = index;
+                    }
+                    emptyCount++;
+                    if (emptyCount > maxEmptyCount) {
+                        maxEmptyCount = emptyCount;
+                        maxEmptyStart = emptyStart;
+                    }
+                } else {
+                    emptyCount = 0;
+                }
+            });
+
+            return { maxEmptyStart, maxEmptyCount };
+        }
+
+        function shortenIPv6Segments(segments, maxEmptyStart, maxEmptyCount) {
+            if (maxEmptyCount > 1) {
+                segments.splice(maxEmptyStart, maxEmptyCount, '');
+            }
+            return segments;
+        }
+
+        function convertBinaryToIPv6(binary) {
+            const paddedBinary = padBinary(binary);
+            const segments = splitBinaryIntoSegments(paddedBinary, 16);
+
+            const ipv6Segments = $.map(segments, convertBinarySegmentToHex);
+
+            const { maxEmptyStart, maxEmptyCount } = findLongestEmptySequence(ipv6Segments);
+            const shortenedSegments = shortenIPv6Segments([...ipv6Segments], maxEmptyStart, maxEmptyCount);
+
+            return shortenedSegments.join(':');
+        }
+
+        $(document).ready(function () {
+            $('#generateButton').click(function () {
+                const input = $('#ipv6Input').val();
+                const [ipv6WithPrefix, prefixLength] = input.split('/');
+                const fullBinary = convertIPv6ToBinary(ipv6WithPrefix);
+                const prefixBinary = fullBinary.substring(0, prefixLength);
+
+                const ipv6Count = parseInt($('#ipv6Count').val(), 10);
+                const interfaceName = $('#interfaceName').val();
+
+                const generatedIPv6Commands = [];
+
+                for (let i = 0; i < ipv6Count; i++) {
+                    const randomBinary = getRandomBinarySegment(128 - prefixLength);
+                    const generatedBinary = prefixBinary + randomBinary;
+                    const generatedIPv6 = convertBinaryToIPv6(generatedBinary);
+
+                    generatedIPv6Commands.push(generatedIPv6 + '/' + prefixLength);
+                }
+
+                const joinedCommands = generatedIPv6Commands.join('\n');
+                $('#ipv6Addresses').val(joinedCommands);
+            });
+
+            $("#generateCMDButton").click(function () {
+                var interfaceName = $("#interfaceName").val();
+                var ipv6AddressesTextarea = $("#ipv6Addresses");
+                var ipv6Addresses = ipv6AddressesTextarea.val().trim().split('\n');
+
+                if (interfaceName === "") {
+                    alert("请输入网卡名称");
+                    return;
+                }
+
+                if (ipv6Addresses.length === 0 || ipv6Addresses.every(function (addr) {
+                    return addr.trim().toLowerCase().startsWith("sudo");
+                })) {
+                    alert("请先生成IPv6地址");
+                    return;
+                }
+
+                var shellCommands = "";
+
+                for (var i = 0; i < ipv6Addresses.length; i++) {
+                    var ipv6Address = ipv6Addresses[i].trim();
+                    if (ipv6Address !== "") {
+                        shellCommands += "sudo ip addr add " + ipv6Address + " dev " + interfaceName + ";";
+                    }
+                }
+
+                ipv6AddressesTextarea.val(shellCommands);
+            });
+        });
+    </script>
+</head>
+<body>
+    <div class="inline-div">
+        IPv6 地址：<input type="text" id="ipv6Input" value="2001:475:35:3f4::6/64" style="width: 200px;"/>
+    </div>
+    <div class="inline-div">
+        获取数量：<input id="ipv6Count" type="number" value="10" min="1" style="width: 70px;" />
+    </div>
+    <div class="inline-div">
+        网卡名称：<input type="text" id="interfaceName" value="eth0" style="width: 70px;" />
+    </div>
+    <br/><br/>
+    <div class="inline-div">
+        <button id="generateButton" class="btn m-b-xs btn-info btn-rounded">生成随机IPv6地址</button>
+    </div>
+    <div class="inline-div">
+        <button id="generateCMDButton" class="btn m-b-xs btn-info btn-rounded">转换为shell指令</button>
+    </div>
+    <div>
+        生成结果：<br/>
+        <textarea id="ipv6Addresses" rows="15" style="width: 100%;" readonly="readonly"></textarea>
+    </div>
+</body>
+</html>
